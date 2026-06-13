@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# pre-push hook for the team-codebase-coordination protocol.
+#
+# Deterministic backstop for the cases where an agent did not consult the
+# coordination skill. Before a push reaches the remote it runs two cheap checks:
+#   1. The branch name follows the handle/slug convention.
+#   2. The branch updates PROJECT_LOG.md relative to the base branch.
+# Neither check can make an agent read other people's decisions, but together
+# they make a skipped protocol visible instead of silent.
+#
+# Install once per repo (shared via the repo, so teammates run only the config line):
+#   mkdir -p .githooks
+#   cp assets/hooks/pre-push .githooks/pre-push
+#   chmod +x .githooks/pre-push
+#   git add .githooks/pre-push && commit it
+# Then every teammate runs once after cloning:
+#   git config core.hooksPath .githooks
+#
+# Genuine exception (skips the hook for one push):
+#   git push --no-verify
+#
+# Optional configuration (environment variables, or edit the defaults below):
+#   COORD_BASE_BRANCH   base branch to diff against        (default: main)
+#   COORD_LOG_FILE      canonical file that must be updated (default: PROJECT_LOG.md)
+#   COORD_MODE          "block" (default) or "warn"
+
+set -euo pipefail
+
+BASE_BRANCH="${COORD_BASE_BRANCH:-main}"
+LOG_FILE="${COORD_LOG_FILE:-PROJECT_LOG.md}"
+MODE="${COORD_MODE:-block}"
+
+remote="${1:-origin}"
+zero="0000000000000000000000000000000000000000"
+fail=0
+
+emit() { echo "coordination hook: $1" >&2; }
+
+# Base and integration branches are exempt from both checks.
+is_protected() {
+  case "$1" in
+    main|master|develop|release|release/*|hotfix/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# stdin lines: <local ref> <local sha> <remote ref> <remote sha>
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -z "${local_ref:-}" ] && continue
+  [ "$local_sha" = "$zero" ] && continue          # branch deletion
+
+  branch="${remote_ref#refs/heads/}"
+  [ "$branch" = "$remote_ref" ] && continue         # non-branch ref (tag, note)
+  is_protected "$branch" && continue
+
+  # Check 1: branch name convention (handle/slug, lowercase).
+  if ! printf '%s' "$branch" | grep -Eq '^[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._/-]*$'; then
+    emit "branch '$branch' does not match the handle/slug convention (e.g. jb/vendor-pos-normalization)."
+    fail=1
+  fi
+
+  # Check 2: the branch updates the canonical log relative to the base branch.
+  base_ref="refs/remotes/$remote/$BASE_BRANCH"
+  if git rev-parse --verify --quiet "$base_ref" >/dev/null; then
+    base_point="$(git merge-base "$base_ref" "$local_sha" 2>/dev/null || true)"
+  else
+    base_point=""
+  fi
+
+  if [ -n "$base_point" ]; then
+    if ! git diff --name-only "$base_point" "$local_sha" -- "$LOG_FILE" | grep -q .; then
+      emit "branch '$branch' does not update $LOG_FILE. Add an Activity log entry (and a Decisions entry if you made a notable choice) before pushing."
+      fail=1
+    fi
+  else
+    emit "could not resolve base '$base_ref'; skipping the $LOG_FILE check for '$branch'. Fetch the base branch to enable it."
+  fi
+done
+
+if [ "$fail" -ne 0 ]; then
+  if [ "$MODE" = "warn" ]; then
+    echo "coordination hook: issues found above (warn mode, push allowed)." >&2
+    exit 0
+  fi
+  echo "coordination hook: push blocked. Fix the items above, or use 'git push --no-verify' for a genuine exception." >&2
+  exit 1
+fi
+
+exit 0
