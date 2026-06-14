@@ -2,7 +2,9 @@
 
 A Claude Code skill for keeping multiple coding agents, each driven by a different human teammate, synchronized on one shared GitHub repository. It establishes a lightweight coordination protocol so agents can work in parallel without stepping on each other, without a central orchestrator, and without a shared session.
 
-> **This skill works best when every contributor on your team installs it.** The protocol depends on all agents reading from and writing to the same coordination file and following the same branch naming conventions. One agent skipping the protocol is a gap in the safety net. See [Team installation](#team-installation) for how to roll it out.
+> **This skill works best when every contributor on your team installs it.** The protocol depends on all agents reading from and writing to the same coordination file and following the same branch naming conventions. One agent skipping the protocol is a gap in the safety net.
+>
+> **Joining a repo that already uses this protocol?** Go straight to [SETUP.md](SETUP.md) — it's a one-page guide covering skill installation, hook activation, and your first task.
 
 ## What this skill does
 
